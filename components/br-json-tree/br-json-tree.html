@@ -1,0 +1,292 @@
+<link rel="import" href="./bower_components/polymer/polymer.html">
+
+<link rel="import" href="./bower_components/iron-icon/iron-icon.html">
+<link rel="import" href="./bower_components/iron-icons/iron-icons.html">
+
+<!--
+`br-json-tree`
+A foldable tree that takes nestable and dynamic JSON data and transforms key-value pairs into parent-child nodes
+
+@demo demo/index.html
+-->
+
+<dom-module id="br-json-tree">
+  <style>
+    :host {
+      display: block;
+    }
+    :host .key {
+      font-weight: 500;
+    }
+    :host .node {
+      padding: 2px;
+    }
+    :host .parent-node {
+      cursor: pointer;
+    }
+    :host .parent-icon {
+      transition: all 0.2s ease-in-out;
+    }
+    :host .parent-container {
+      padding: 2px;
+      border-radius: 2px;
+      background: rgba(255,255,0,0);
+      transition: background 0.3s ease-in-out;
+    }
+    :host .parent-container.collapsed > *:not(.parent-node) {
+      display: none;
+    }
+    :host .parent-container.collapsed .parent-icon {
+      transform: rotate(-90deg);
+    }
+    :host .parent-container .parent-node .parent-node-collapse {
+      display: none;
+    }
+    :host .parent-container.collapsed .parent-node .parent-node-collapse {
+      display: inherit;
+    }
+    :host .parent-container.highlight {
+      background: rgba(255,255,0,0.5);
+    }
+    :host .parent-container.hide {
+      display: none;
+    }
+  </style>
+  <template>
+    <div id="tree"></div>
+  </template>
+
+  <script>
+    Polymer({
+      is: 'br-json-tree',
+
+      properties: {
+        jsonData: {
+          type: Object,
+          notify: true
+        },
+
+        indentSpacing: {
+          type: String,
+          value: '40px'
+        },
+
+        hiddenKeys: {
+          type: Array,
+          value: function() {
+            return [];
+          }
+        },
+
+        live: {
+          type: Boolean,
+          value: false
+        },
+
+        _once: {
+          type: Boolean,
+          value: false
+        },
+
+        _collapsedTable: {
+          type: Object,
+          value: function(){
+            return {};
+          }
+        },
+
+        _highlightedTable: {
+          type: Object,
+          value: function(){
+            return {};
+          }
+        },
+
+        _hiddenTable: {
+          type: Object,
+          value: function(){
+            return {};
+          }
+        },
+
+        _highlightTimeoutId: {
+          type: Object
+        },
+
+        log: {
+          type: Boolean,
+          value: false
+        }
+      },
+
+      observers: [
+        '_observeJsonData(jsonData.*)',
+        '_observeHiddenKeys(hiddenKeys.*)'
+      ],
+
+      expandAll: function(){
+        this.querySelectorAll('.parent-container.collapsed').forEach(function(element){
+          element.classList.remove('collapsed');
+          this.set('_collapsedTable.'+element.id,false);
+        }.bind(this));
+      },
+
+      collapseAll: function(){
+        this.querySelectorAll('.parent-container:not(.collapsed)').forEach(function(element){
+          element.classList.add('collapsed');
+          this.set('_collapsedTable.'+element.id,true);
+        }.bind(this));
+      },
+
+      _observeHiddenKeys: function(change){
+        if(this.log) console.log('[my-json-tree] _observeHiddenKeys change:',change);
+        // this.notifyPath('jsonData');
+        var data = this.get('jsonData');
+        if(data) this._startBuildTree(data);
+      },
+
+      onParentToggle: function(event){
+        if(this.log) console.log('[my-json-tree] onParentToggle event.currentTarget.parentElement: ',event.currentTarget.parentElement);
+        var parent = event.currentTarget.parentElement;
+        var collapsed = parent.classList.contains('collapsed');
+        this.set('_collapsedTable.'+parent.id,!collapsed);
+        this.toggleClass('collapsed',!collapsed,parent);
+      },
+
+      forceUpdate: function(){
+        var data = this.get('jsonData');
+        if(data) this._startBuildTree(data);
+      },
+
+      _observeJsonData: function(jsonDataChange){
+        if(this.log) console.log('[my-json-tree] _observeJsonData change: ',jsonDataChange);
+        if(!jsonDataChange || !jsonDataChange.base) return;
+        var data = jsonDataChange.base;
+        var changePath = jsonDataChange.path;
+        // var parent = document.getElementById('tree');
+        if(this.live || !this._once){
+          this.debounce('_startBuildTree',function(){
+            this._startBuildTree(data,changePath);
+            this._once = true;
+          },500)
+        }
+      },
+
+      _startBuildTree: function(data,changePath){
+        var parent = this.$.tree;
+        parent.innerHTML = "";
+        this._buildTree(data,parent,0,'jsonData',changePath);
+      },
+
+      _buildTree: function(data,parent,level,path,changePath){
+        var type = typeof data;
+        if(type === 'object'){
+          if(!data) return;
+          Object.keys(data).forEach(function(key){
+            if(typeof data[key] === 'object'){
+              var newPath = path+"."+key
+              var newId = newPath.split('.').join('_');
+              var collapsed = this.get('_collapsedTable.'+newId);
+              var highlighted = this.get('_highlightedTable.'+newId);
+              var hidden = this.get('_hiddenTable.'+newId);
+              var startDiv = document.createElement('div');
+              startDiv.classList.add('parent-container');
+              if(collapsed !== false){
+                startDiv.classList.add('collapsed');
+                this.set('_collapsedTable.'+newId,true);
+              }
+              if(highlighted){
+                startDiv.classList.add('highlight');
+              }
+              if(hidden || this.hiddenKeys.indexOf(key) !== -1){
+                startDiv.classList.add('hide');
+                // this.set('_hiddenTable.'+newId,true);
+              }
+              if(newPath === changePath){
+                startDiv.classList.add('highlight');
+                this.set('_highlightedTable.'+newId,Date.now())
+                // if(this._highlightTimeoutId) clearTimeout(this._highlightTimeoutId);
+                setTimeout(function(){
+                  this._clearHighlights();
+                }.bind(this),1000);
+              }
+              startDiv.id = newId;
+              if(level != 0) startDiv.style.marginLeft = this.indentSpacing;
+              var parentDiv = document.createElement('div');
+              parentDiv.classList.add('parent-node');
+              this.listen(parentDiv,'tap','onParentToggle');
+              parentDiv.innerHTML = "<iron-icon class='parent-icon' icon='icons:arrow-drop-down'></iron-icon><span class='key'>"+key+":  </span><span class='value'>{<span class='parent-node-collapse'>...}</span></span>";
+              startDiv.appendChild(parentDiv);
+              this._buildTree(data[key],startDiv,level+1,newPath,changePath);
+              var endDiv = document.createElement('div');
+              endDiv.style.marginLeft = '24px';
+              endDiv.innerHTML = "}";
+              startDiv.appendChild(endDiv);
+              // parent.appendChild(startDiv);
+              var retVal = Polymer.dom(parent).appendChild(startDiv);
+              // console.log('[my-json-tree] _buildTree retVal: ',retVal);
+
+            } else if(typeof data[key] === 'array'){
+              var startDiv = document.createElement('div');
+              if(level != 0) startDiv.style.marginLeft = this.indentSpacing;
+              startDiv.innerHTML = key+":  [";
+
+              for(var i=0; i<data.length; i++){
+                this._buildTree(data[i],startDiv,level+1)
+              }
+              var endDiv = document.createElement('div');
+              endDiv.innerHTML = "]";
+              startDiv.appendChild(endDiv);
+              // parent.appendChild(startDiv);
+              Polymer.dom(parent).appendChild(startDiv);
+            } else {
+              var div = document.createElement('div');
+              div.classList.add('node');
+              if(level != 0) div.style.marginLeft = this.indentSpacing;
+              else div.style.marginLeft = "24px";
+              div.innerHTML = "<span class='key'>"+key+":</span>  "+data[key];
+              // parent.appendChild(div)
+              Polymer.dom(parent).appendChild(div);
+            }
+          }.bind(this));
+        } else if(type === 'array'){
+          var startDiv = document.createElement('div');
+          if(level != 0) startDiv.style.marginLeft = this.indentSpacing;
+          startDiv.innerHTML = "[";
+
+          for(var i=0; i<data.length; i++){
+            this._buildTree(data[i],startDiv,level+1)
+          }
+          var endDiv = document.createElement('div');
+          endDiv.innerHTML = "]";
+          startDiv.appendChild(endDiv);
+          // parent.appendChild(startDiv);
+          Polymer.dom(parent).appendChild(startDiv);
+        } else {
+          var div = document.createElement('div');
+          if(level !=0) div.style.marginLeft = this.indentSpacing;
+          div.innerHTML = data;
+          // parent.appendChild(div);
+          Polymer.dom(parent).appendChild(div);
+        }
+        return parent;
+      },
+
+      _clearHighlights: function(){
+        var highlights = this.get('_highlightedTable');
+        var now = Date.now();
+        Object.keys(highlights).forEach(function(key){
+          if(highlights[key]){
+            var diff = now-highlights[key];
+            // console.log('[my-json-tree] _clearHighlights diff: ',diff,'for key: ',key);
+            if(diff >= 950){
+              var node = document.getElementById(key);
+              this.toggleClass('highlight',false,node);
+              this.set('_highlightedTable.'+key,null);
+            }
+          }
+        }.bind(this))
+      }
+    })
+  </script>
+</dom-module>
